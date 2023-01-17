@@ -1,7 +1,9 @@
-# crsindex
-Experiment with custom Xarray index that propagates CRS information
+# Xarray flexible indexes experiments
 
-Needs the `scipy22` branch at `pydata/xarray`
+
+## CRSIndex
+
+Experiment with custom Xarray index that propagates CRS information
 
 Follows instructions [here](https://hackmd.io/Zxw_zCa7Rbynx_iJu6Y3LA?view)
 
