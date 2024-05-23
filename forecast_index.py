@@ -45,7 +45,7 @@ class ModelRun:
     def get_indexer(
         self, model: Model | None, time_index: pd.DatetimeIndex, period_index: pd.TimedeltaIndex
     ) -> tuple[int, slice]:
-        (time_idxr,) = time_index.get_indexer([self.time])
+        time_idxr = time_index.get_loc(self.time)
         period_idxr = slice(None)
 
         if model is Model.HRRR and self.time.hour % 6 != 0:
@@ -168,13 +168,10 @@ class BestEstimate:
         # else:
         # (first_index,) = time_index.get_indexer([self.since])
 
-        if self.asof is None:
-            last_index = time_index.size - 1
-        else:
-            (last_index,) = time_index.get_indexer([self.asof])
+        last_index = time_index.size - 1 if self.asof is None else time_index.get_loc(self.asof)
 
         # TODO: refactor to a Model dataclass that does this filtering appropriately.
-        if model is Model.HRRR and time_index[first_index].hour % 6 != 0:
+        if model is Model.HRRR and time_index[last_index].hour % 6 != 0:
             nsteps = 19
         else:
             nsteps = period_index.size
@@ -353,7 +350,7 @@ class ForecastIndex(Index):
                 }
                 indexes[time_name] = self._indexes.reference_time[time_idxr]
                 # TODO: this triggers a bug.
-                # variables["valid_time"] = xr.Variable((), label.time)
+                # variables["valid_time"] = xr.Variable((), label.time, {"standard_name": "time"})
 
             case BestEstimate():
                 indexer = {
@@ -367,12 +364,11 @@ class ForecastIndex(Index):
 
         if not isinstance(label, ConstantForecast):
             valid_time = time_index[time_idxr] + period_index[period_idxr]
-            variables["valid_time"] = xr.Variable(valid_time_dim, valid_time)
+            variables["valid_time"] = xr.Variable(
+                valid_time_dim, data=valid_time, attrs={"standard_name": "time"}
+            )
             indexes["valid_time"] = PandasIndex(valid_time, dim=valid_time_dim)
 
-        # sel needs to only handle keys in labels
-        # since it delegates to isel.
-        # we handle all entries in ._indexes there
         return IndexSelResult(
             dim_indexers=indexer, indexes=indexes, variables=variables, drop_coords=["forecast"]
         )
