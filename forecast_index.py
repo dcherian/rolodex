@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Hashable
 import copy
 import datetime
 import enum
-from dataclasses import dataclass
 import itertools
+from dataclasses import dataclass
+from typing import Hashable
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -72,7 +73,7 @@ class ConstantOffset:
         time_idxr = slice(None)
         (period_idxr,) = period_index.get_indexer([self.step])
 
-        if model is Model.HRRR and self.step.asm8.astype(int)/1e9/3600 > 18:
+        if model is Model.HRRR and self.step.asm8.astype(int) / 1e9 / 3600 > 18:
             model_mask = np.ones(time_index.shape, dtype=bool)
             model_mask[time_index.hour % 6 != 0] = False
             time_idxr = np.arange(time_index.size)[model_mask]
@@ -140,13 +141,14 @@ class BestEstimate:
     best estimate dataset, which covers the entire time range of the collection.
     """
 
+    # To restrict the start of the slice,
+    # just use the standard `.sel(time=slice(since, None))`
     # TODO: `since` could be a timedelta relative to `asof`.
-    # TODO: could have slice(since, asof)
-    since: pd.Timestamp | None = None
+    # since: pd.Timestamp | None = None
     asof: pd.Timestamp | None = None
 
     def __post_init__(self):
-        if self.asof is not None and self.since is not None and self.asof < self.since:
+        if self.asof is not None and self.asof < self.since:
             raise ValueError(
                 "Can't request best estimate since {since=!r} "
                 "which is earlier than requested {asof=!r}"
@@ -161,10 +163,10 @@ class BestEstimate:
             )
 
         # TODO: consolidate the get_indexer lookup
-        if self.since is None:
-            first_index = 0
-        else:
-            (first_index,) = time_index.get_indexer([self.since])
+        # if self.since is None:
+        first_index = 0
+        # else:
+        # (first_index,) = time_index.get_indexer([self.since])
 
         if self.asof is None:
             last_index = time_index.size - 1
@@ -197,10 +199,7 @@ class Indexes:
 
     def get_names(self) -> [Hashable, Hashable]:
         # TODO: is this dependable?
-        return{"reference_time": self.reference_time.index.name,
-               "period": self.period.index.name
-               }
-
+        return {"reference_time": self.reference_time.index.name, "period": self.period.index.name}
 
 
 class ForecastIndex(Index):
@@ -214,6 +213,15 @@ class ForecastIndex(Index):
     --------
     To do FMRC-style indexing, you'll need to first add a "dummy" scalar variable,
     say `"forecast"`.
+
+    >>> from forecast_index import (
+    ...     BestEstimate,
+    ...     ConstantForecast,
+    ...     ConstantOffset,
+    ...     ForecastIndex,
+    ...     ModelRun,
+    ...     Model,
+    ... )
     >>> ds.coords["forecast"] = 0
 
     Create the new index where `time` is the `forecast_reference_time` dimension,
@@ -233,6 +241,7 @@ class ForecastIndex(Index):
 
     >>> newds.sel(forecast=ModelRun("2024-05-20 13:00"))
     """
+
     def __init__(self, variables: Indexes, dummy_name: str, model: Model | None = None):
         self._indexes = variables
 
@@ -305,9 +314,12 @@ class ForecastIndex(Index):
                 idxr = result.dim_indexers[period_name]
                 new_indexes.period = new_indexes.period[idxr]
             new_index = type(self)(new_indexes, dummy_name=self.dummy_name, model=self.model)
-            results.append(IndexSelResult({}, indexes={k: new_index for k in [self.dummy_name, time_name, period_name]}))
+            results.append(
+                IndexSelResult(
+                    {}, indexes={k: new_index for k in [self.dummy_name, time_name, period_name]}
+                )
+            )
             return merge_sel_results(results)
-
 
         assert len(labels) == 1
         assert next(iter(labels.keys())) == self.dummy_name
@@ -366,5 +378,9 @@ class ForecastIndex(Index):
         )
 
     def __repr__(self):
-        string = f"<ForecastIndex along [{', '.join(itertools.chain((self.dummy_name,), self.names.values()))}]>"
+        string = (
+            "<ForecastIndex along ["
+            + ", ".join(itertools.chain((self.dummy_name,), self.names.values()))
+            + "]>"
+        )
         return string

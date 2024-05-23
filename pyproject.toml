@@ -1,0 +1,24 @@
+[tool.ruff]
+line-length = 100
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle
+    "F", # Pyflakes
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "SIM",     # flake8-simplify
+    "I", # isort
+    "RSE", # Raise
+    "NPY", # numpy
+    "RUF", # Ruff
+]
+ignore = [
+    "UP032", # format in logger statements
+]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+docstring-code-format = true
