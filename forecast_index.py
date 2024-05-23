@@ -73,7 +73,7 @@ class ConstantOffset:
         time_idxr = slice(None)
         (period_idxr,) = period_index.get_indexer([self.step])
 
-        if model is Model.HRRR and self.step.asm8.astype(int) / 1e9 / 3600 > 18:
+        if model is Model.HRRR and self.step.total_seconds() / 3600 > 18:
             model_mask = np.ones(time_index.shape, dtype=bool)
             model_mask[time_index.hour % 6 != 0] = False
             time_idxr = np.arange(time_index.size)[model_mask]
