@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import copy
 import datetime
 import enum
 from dataclasses import dataclass
-
+import itertools
 import numpy as np
 import pandas as pd
 import xarray as xr
 from xarray.core.indexes import Index, PandasIndex
-from xarray.core.indexing import IndexSelResult
+from xarray.core.indexing import IndexSelResult, merge_sel_results
 
 Timestamp = str | datetime.datetime | pd.Timestamp | np.datetime64
 Timedelta = str | datetime.timedelta | np.timedelta64  # TODO: pd.DateOffset also?
@@ -192,13 +193,9 @@ class BestEstimate:
 class Indexes:
     reference_time: PandasIndex
     period: PandasIndex
-    # valid_time: xr.Variable
 
 
 class ForecastIndex(Index):
-    # based off Benoit's RasterIndex in
-    # https://hackmd.io/Zxw_zCa7Rbynx_iJu6Y3LA?view
-
     def __init__(self, variables: Indexes, dummy_name: str, model: Model | None = None):
         self._indexes = variables
 
@@ -242,8 +239,7 @@ class ForecastIndex(Index):
         2. Along the `forecast_reference_time` dimension, identical to ModelRun
         3. Along the `forecast_period` dimension, indentical to ConstantOffset
 
-        You cannot mix (1) with (2) or (3), but (2) and (3) can be combined in a single
-        statement.
+        You cannot mix (1) with (2) or (3), but (2) and (3) can be combined in a single statement.
         """
         if self.dummy_name in labels and len(labels) != 1:
             raise ValueError(
@@ -251,15 +247,35 @@ class ForecastIndex(Index):
                 f"indexing along {tuple(self.names)!r}"
             )
 
-        # TODO: merge_sel_results here.
-        # default = IndexSelResult(
-        #     dim_indexers=indexer, variables=new_indexers, drop_coords=["forecast"]
-        # )
+        time_name, period_name = self.names["reference_time"], self.names["period"]
+
+        # This allows normal `.sel` along `time_name` and `period_name` to work
+        if time_name in labels or period_name in labels:
+            if self.dummy_name in labels:
+                raise ValueError(
+                    f"Selecting along {time_name!r} or {period_name!r} cannot "
+                    f"be combined with FMRC-style indexing along {self.dummy_name!r}."
+                )
+            time_index, period_index = self._indexes.reference_time, self._indexes.period
+            new_indexes = copy.deepcopy(self._indexes)
+            results = []
+            if time_name in labels:
+                result = time_index.sel({time_name: labels[time_name]}, **kwargs)
+                results.append(result)
+                idxr = result.dim_indexers[time_name]
+                new_indexes.reference_time = new_indexes.reference_time[idxr]
+            if period_name in labels:
+                result = period_index.sel({period_name: labels[period_name]}, **kwargs)
+                results.append(result)
+                idxr = result.dim_indexers[period_name]
+                new_indexes.period = new_indexes.period[idxr]
+            new_index = type(self)(new_indexes, dummy_name=self.dummy_name, model=self.model)
+            results.append(IndexSelResult({}, indexes={k: new_index for k in [self.dummy_name, time_name, period_name]}))
+            return merge_sel_results(results)
+
+
         assert len(labels) == 1
-        if self.names["reference_time"] in labels:
-            return self._indexes.reference_time.sel(labels, **kwargs)
-        elif self.names["period"] in labels:
-            return self._indexes.period.sel(labels, **kwargs)
+        assert next(iter(labels.keys())) == self.dummy_name
 
         label: ConstantOffset | ModelRun | ConstantForecast | BestEstimate
         label = next(iter(labels.values()))
@@ -269,42 +285,51 @@ class ForecastIndex(Index):
 
         time_idxr, period_idxr = label.get_indexer(self.model, time_index, period_index)
 
+        indexer, indexes, variables = {}, {}, {}
         match label:
             case ConstantOffset():
-                indexer = {self.names["period"]: period_idxr}
-                if time_idxr is not slice(None):
-                    indexer = {self.names["reference_time"]: time_idxr}
+                indexer[time_name] = time_idxr
+                indexer[period_name] = period_idxr
+                indexes[time_name] = self._indexes.reference_time[time_idxr]
+                valid_time_dim = time_name
 
-            case ModelRun(timestamp):
-                indexer = {self.names["reference_time"]: time_index.get_indexer(timestamp)}
-                if period_idxr is not slice(None):
-                    indexer = {self.names["period"]: period_idxr}
+            case ModelRun():
+                indexer[time_name] = time_idxr
+                indexer[period_name] = period_idxr
+                indexes[period_name] = self._indexes.period[period_idxr]
+                valid_time_dim = period_name
 
-            case ConstantForecast() | BestEstimate():
+            case ConstantForecast():
                 indexer = {
-                    self.names["reference_time"]: xr.Variable("valid_time", time_idxr),
-                    self.names["period"]: xr.Variable("valid_time", period_idxr),
+                    time_name: xr.Variable(time_name, time_idxr),
+                    period_name: xr.Variable(time_name, period_idxr),
                 }
+                indexes[time_name] = self._indexes.reference_time[time_idxr]
+                # TODO: this triggers a bug.
+                # variables["valid_time"] = xr.Variable((), label.time)
+
+            case BestEstimate():
+                indexer = {
+                    time_name: xr.Variable("valid_time", time_idxr),
+                    period_name: xr.Variable("valid_time", period_idxr),
+                }
+                valid_time_dim = "valid_time"
 
             case _:
                 raise ValueError(f"Invalid indexer type {type(label)} for label: {label}")
 
-        match label:
-            case ConstantForecast():
-                new_indexers = {"valid_time": xr.Variable("valid_time", [label.time])}
-            case BestEstimate():
-                new_indexers = {"valid_time": time_index[time_idxr] + period_index[period_idxr]}
-            case _:
-                new_indexers = {}
+        if not isinstance(label, ConstantForecast):
+            valid_time = time_index[time_idxr] + period_index[period_idxr]
+            variables["valid_time"] = xr.Variable(valid_time_dim, valid_time)
+            indexes["valid_time"] = PandasIndex(valid_time, dim=valid_time_dim)
 
         # sel needs to only handle keys in labels
         # since it delegates to isel.
         # we handle all entries in ._indexes there
-        # TODO: add valid_time index here.
         return IndexSelResult(
-            dim_indexers=indexer, variables=new_indexers, drop_coords=["forecast"]
+            dim_indexers=indexer, indexes=indexes, variables=variables, drop_coords=["forecast"]
         )
 
     def __repr__(self):
-        string = f"<ForecastIndex along [{', '.join(self.dummy_name, *self.names.values())}]>"
+        string = f"<ForecastIndex along [{', '.join(itertools.chain((self.dummy_name,), self.names.values()))}]>"
         return string
