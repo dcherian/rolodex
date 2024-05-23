@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Hashable
 import copy
 import datetime
 import enum
@@ -194,8 +195,44 @@ class Indexes:
     reference_time: PandasIndex
     period: PandasIndex
 
+    def get_names(self) -> [Hashable, Hashable]:
+        # TODO: is this dependable?
+        return{"reference_time": self.reference_time.index.name,
+               "period": self.period.index.name
+               }
+
+
 
 class ForecastIndex(Index):
+    """
+    An Xarray custom Index that allows indexing a forecast data-cube with
+    `forecast_reference_time` (commonly `init`) and `forecast_period`
+    (commonly `step` or `lead`) dimensions as _Forecast Model Run Collections_.
+
+
+    Examples
+    --------
+    To do FMRC-style indexing, you'll need to first add a "dummy" scalar variable,
+    say `"forecast"`.
+    >>> ds.coords["forecast"] = 0
+
+    Create the new index where `time` is the `forecast_reference_time` dimension,
+    and `step` is the `forecast_period` dimension.
+    >>> newds = ds.drop_indexes(["time", "step"]).set_xindex(
+        ["time", "step", "forecast"], ForecastIndex, model=Model.HRRR
+        )
+    >>> newds
+
+    Use `forecast` to indicate FMRC-style indexing
+
+    >>> newds.sel(forecast=BestEstimate())
+
+    >>> newds.sel(forecast=ConstantForecast("2024-05-20"))
+
+    >>> newds.sel(forecast=ConstantOffset("32h"))
+
+    >>> newds.sel(forecast=ModelRun("2024-05-20 13:00"))
+    """
     def __init__(self, variables: Indexes, dummy_name: str, model: Model | None = None):
         self._indexes = variables
 
@@ -203,10 +240,8 @@ class ForecastIndex(Index):
         self.dummy_name = dummy_name
         self.model = model
 
-        self.names = {
-            "reference_time": self._indexes.reference_time.index.name,
-            "period": self._indexes.period.index.name,
-        }
+        # We use "reference_time", "period" as internal references.
+        self.names = variables.get_names()
 
     @classmethod
     def from_variables(cls, variables, options):
