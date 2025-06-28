@@ -1,6 +1,5 @@
 # Xarray flexible indexes experiments
 
-
 ## CRSIndex
 
 Experiment with custom Xarray index that propagates CRS information

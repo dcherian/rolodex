@@ -4,8 +4,8 @@ import copy
 import datetime
 import enum
 import itertools
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Hashable
 
 import numpy as np
 import pandas as pd
@@ -270,6 +270,13 @@ class ForecastIndex(Index):
                 elif var.ndim == 0:
                     dummy_name = name
 
+        if "reference_time" not in indexes:
+            raise ValueError(
+                "No array with attribute `standard_name: 'forecast_reference_time'` found."
+            )
+        if "period" not in indexes:
+            raise ValueError("No array with attribute `standard_name: 'forecast_period'` found.")
+
         return cls(Indexes(**indexes), dummy_name=dummy_name, **options)
 
     def sel(self, labels, **kwargs):
@@ -278,7 +285,7 @@ class ForecastIndex(Index):
         1. Along the dummy "forecast" variable: enable specialized methods using
            ConstantOffset, ModelRun, ConstantForecast, BestEstimate
         2. Along the `forecast_reference_time` dimension, identical to ModelRun
-        3. Along the `forecast_period` dimension, indentical to ConstantOffset
+        3. Along the `forecast_period` dimension, identical to ConstantOffset
 
         You cannot mix (1) with (2) or (3), but (2) and (3) can be combined in a single statement.
         """

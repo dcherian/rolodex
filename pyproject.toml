@@ -1,24 +1,128 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/.github",
+  "/docs",
+  "/experiments"
+]
+
+[project]
+name = "rolodex"
+description = "Custom indexes for Xarray"
+license = "CC0-1.0"
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["xarray"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "xarray>=2025",
+]
+dynamic=["version"]
+
+[project.optional-dependencies]
+test = [
+  "pooch",
+  "netCDF4",
+]
+docs = [
+  "pooch",
+  "netCDF4",
+  "matplotlib",
+  # Doc building
+  'sphinx',
+  'sphinx-autoapi',
+  'sphinx-autobuild>=2021.3.14',
+  'sphinx-copybutton',
+  'sphinx-remove-toctrees',
+  'sphinx-codeautolink',
+  'myst-parser',
+  'myst-nb',
+  'furo',
+  'numpydoc',
+  'sphinxext-opengraph[social_cards]',
+]
+
+[tool.hatch]
+version.source = "vcs"
+
+[tool.hatch.build]
+hooks.vcs.version-file = "rolodex/_version.py"
+
 [tool.ruff]
 line-length = 100
-extend-include = ["*.ipynb"]
+target-version = "py311"
+builtins = ["ellipsis"]
+exclude = [
+    ".eggs",
+    "doc",
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "coverage",
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist"
+]
+features = ["test"]
+
+[[tool.hatch.envs.test.matrix]]
+python = ["3.11", "3.13"]
 
 [tool.ruff.lint]
-select = [
-    "E", # pycodestyle
-    "F", # Pyflakes
-    "UP", # pyupgrade
-    "B", # flake8-bugbear
-    "SIM",     # flake8-simplify
-    "I", # isort
-    "RSE", # Raise
-    "NPY", # numpy
-    "RUF", # Ruff
-]
+# E402: module level import not at top of file
+# E501: line too long - let black worry about that
+# E731: do not assign a lambda expression, use a def
 ignore = [
-    "UP032", # format in logger statements
+    "E402",
+    "E501",
+    "E731",
 ]
-fixable = ["ALL"]
-unfixable = []
+select = [
+    # Bugbear
+    # "B",
+    # Pyflakes
+    "F",
+    # Pycodestyle
+    "E",
+    "W",
+    # isort
+    "I",
+    # Pyupgrade
+    "UP",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rolodex"]
+known-third-party = [
+    "xarray"
+]
 
 [tool.ruff.format]
+# Enable reformatting of code snippets in docstrings.
 docstring-code-format = true
+
+[tool.pytest.ini_options]
+addopts = "--tb=short"
+minversion = "7"
+testpaths = ["tests"]
+
+[tool.codespell]
+ignore-words-list = "nd,nax,coo"
+skip = "*.html"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+namespace_packages = false
