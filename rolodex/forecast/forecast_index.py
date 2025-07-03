@@ -4,17 +4,42 @@ import copy
 import datetime
 import enum
 import itertools
+import operator
 from collections.abc import Hashable
 from dataclasses import dataclass
+from functools import partial
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-from xarray.core.indexes import Index, PandasIndex
-from xarray.core.indexing import IndexSelResult, merge_sel_results
+from xarray import Index, IndexSelResult
+from xarray.core.indexing import merge_sel_results
+from xarray.indexes import PandasIndex
 
 Timestamp = str | datetime.datetime | pd.Timestamp | np.datetime64
 Timedelta = str | datetime.timedelta | np.timedelta64  # TODO: pd.DateOffset also?
+
+
+def create_lazy_valid_time_variable(
+    *, reference_time: xr.DataArray, period: xr.DataArray
+) -> xr.DataArray:
+    # TODO: work to make this public API upstream
+    from xarray.coding.variables import lazy_elemwise_func
+
+    assert reference_time.ndim == 1
+    assert period.ndim == 1
+
+    shape = (reference_time.size, period.size)
+    time_broadcast = np.broadcast_to(reference_time.data[:, np.newaxis], shape)
+    step_broadcast = np.broadcast_to(period.data[np.newaxis, :], shape)
+
+    valid_time = lazy_elemwise_func(
+        time_broadcast, partial(operator.add, step_broadcast), dtype=reference_time.dtype
+    )
+    return xr.DataArray(
+        valid_time, dims=(*reference_time.dims, *period.dims), attrs={"standard_name": "time"}
+    )
 
 
 ####################
@@ -208,42 +233,44 @@ class ForecastIndex(Index):
 
     Examples
     --------
-    To do FMRC-style indexing, you'll need to first add a "dummy" scalar variable,
-    say `"forecast"`.
+    To do FMRC-style indexing, you'll need to first add a "valid time" variable.
 
-    >>> from forecast_index import (
+    >>> from rolodex.forecast import (
     ...     BestEstimate,
     ...     ConstantForecast,
     ...     ConstantOffset,
     ...     ForecastIndex,
     ...     ModelRun,
     ...     Model,
+    ...     create_lazy_valid_time_variable,
     ... )
-    >>> ds.coords["forecast"] = 0
+    >>> ds.coords["valid_time"] = create_lazy_valid_time_variable(
+    ...     reference_time=ds.time, period=ds.step
+    ... )
 
     Create the new index where `time` is the `forecast_reference_time` dimension,
     and `step` is the `forecast_period` dimension.
     >>> newds = ds.drop_indexes(["time", "step"]).set_xindex(
-        ["time", "step", "forecast"], ForecastIndex, model=Model.HRRR
+        ["time", "step", "valid_time"], ForecastIndex, model=Model.HRRR
         )
     >>> newds
 
-    Use `forecast` to indicate FMRC-style indexing
+    Use `valid_time` to indicate FMRC-style indexing
 
-    >>> newds.sel(forecast=BestEstimate())
+    >>> newds.sel(valid_time=BestEstimate())
 
-    >>> newds.sel(forecast=ConstantForecast("2024-05-20"))
+    >>> newds.sel(valid_time=ConstantForecast("2024-05-20"))
 
-    >>> newds.sel(forecast=ConstantOffset("32h"))
+    >>> newds.sel(valid_time=ConstantOffset("32h"))
 
-    >>> newds.sel(forecast=ModelRun("2024-05-20 13:00"))
+    >>> newds.sel(valid_time=ModelRun("2024-05-20 13:00"))
     """
 
-    def __init__(self, variables: Indexes, dummy_name: str, model: Model | None = None):
+    def __init__(self, variables: Indexes, valid_time_name: str, model: Model | None = None):
         self._indexes = variables
 
-        assert isinstance(dummy_name, str)
-        self.dummy_name = dummy_name
+        assert isinstance(valid_time_name, str)
+        self.valid_time_name = valid_time_name
         self.model = model
 
         # We use "reference_time", "period" as internal references.
@@ -260,6 +287,7 @@ class ForecastIndex(Index):
         assert len(variables) == 3
 
         indexes = {}
+        valid_time_name: str | None = None
         for k in ["forecast_reference_time", "forecast_period"]:
             for name, var in variables.items():
                 std_name = var.attrs.get("standard_name", None)
@@ -267,8 +295,13 @@ class ForecastIndex(Index):
                     indexes[k.removeprefix("forecast_")] = PandasIndex.from_variables(
                         {name: var}, options={}
                     )
-                elif var.ndim == 0:
-                    dummy_name = name
+                elif var.ndim == 2:
+                    valid_time_name = name
+
+        if valid_time_name is None:
+            raise ValueError("Could not detect the 2D 'valid time' variable.")
+
+        assert isinstance(valid_time_name, str)
 
         if "reference_time" not in indexes:
             raise ValueError(
@@ -277,7 +310,7 @@ class ForecastIndex(Index):
         if "period" not in indexes:
             raise ValueError("No array with attribute `standard_name: 'forecast_period'` found.")
 
-        return cls(Indexes(**indexes), dummy_name=dummy_name, **options)
+        return cls(Indexes(**indexes), valid_time_name=valid_time_name, **options)
 
     def sel(self, labels, **kwargs):
         """
@@ -289,9 +322,9 @@ class ForecastIndex(Index):
 
         You cannot mix (1) with (2) or (3), but (2) and (3) can be combined in a single statement.
         """
-        if self.dummy_name in labels and len(labels) != 1:
+        if self.valid_time_name in labels and len(labels) != 1:
             raise ValueError(
-                f"Indexing along {self.dummy_name!r} cannot be combined with "
+                f"Indexing along {self.valid_time_name!r} cannot be combined with "
                 f"indexing along {tuple(self.names)!r}"
             )
 
@@ -299,10 +332,10 @@ class ForecastIndex(Index):
 
         # This allows normal `.sel` along `time_name` and `period_name` to work
         if time_name in labels or period_name in labels:
-            if self.dummy_name in labels:
+            if self.valid_time_name in labels:
                 raise ValueError(
                     f"Selecting along {time_name!r} or {period_name!r} cannot "
-                    f"be combined with FMRC-style indexing along {self.dummy_name!r}."
+                    f"be combined with FMRC-style indexing along {self.valid_time_name!r}."
                 )
             time_index, period_index = self._indexes.reference_time, self._indexes.period
             new_indexes = copy.deepcopy(self._indexes)
@@ -317,19 +350,30 @@ class ForecastIndex(Index):
                 results.append(result)
                 idxr = result.dim_indexers[period_name]
                 new_indexes.period = new_indexes.period[idxr]
-            new_index = type(self)(new_indexes, dummy_name=self.dummy_name, model=self.model)
+            new_index = type(self)(
+                new_indexes, valid_time_name=self.valid_time_name, model=self.model
+            )
             results.append(
                 IndexSelResult(
-                    {}, indexes={k: new_index for k in [self.dummy_name, time_name, period_name]}
+                    {},
+                    indexes={k: new_index for k in [self.valid_time_name, time_name, period_name]},
                 )
             )
             return merge_sel_results(results)
 
         assert len(labels) == 1
-        assert next(iter(labels.keys())) == self.dummy_name
+        assert next(iter(labels.keys())) == self.valid_time_name
 
-        label: ConstantOffset | ModelRun | ConstantForecast | BestEstimate
         label = next(iter(labels.values()))
+        if not isinstance(label, ConstantOffset | ModelRun | ConstantForecast | BestEstimate):
+            if isinstance(label, list | tuple | np.ndarray):
+                raise ValueError(
+                    f"Along {self.valid_time_name!r}, only indexing with scalars, or one of the FMRC-style indexer objects is allowed."
+                )
+            label = ConstantForecast(label)
+
+        if TYPE_CHECKING:
+            assert isinstance(label, ConstantOffset | ModelRun | ConstantForecast | BestEstimate)
 
         time_index: pd.DatetimeIndex = self._indexes.reference_time.index  # type: ignore[assignment]
         period_index: pd.TimedeltaIndex = self._indexes.period.index  # type: ignore[assignment]
@@ -356,8 +400,7 @@ class ForecastIndex(Index):
                     period_name: xr.Variable(time_name, period_idxr),
                 }
                 indexes[time_name] = self._indexes.reference_time[time_idxr]
-                # TODO: this triggers a bug.
-                # variables["valid_time"] = xr.Variable((), label.time, {"standard_name": "time"})
+                variables["valid_time"] = xr.Variable((), label.time, {"standard_name": "time"})
 
             case BestEstimate():
                 indexer = {
@@ -376,14 +419,12 @@ class ForecastIndex(Index):
             )
             indexes["valid_time"] = PandasIndex(valid_time, dim=valid_time_dim)
 
-        return IndexSelResult(
-            dim_indexers=indexer, indexes=indexes, variables=variables, drop_coords=["forecast"]
-        )
+        return IndexSelResult(dim_indexers=indexer, indexes=indexes, variables=variables)
 
     def __repr__(self):
         string = (
             "<ForecastIndex along ["
-            + ", ".join(itertools.chain((self.dummy_name,), self.names.values()))
+            + ", ".join(itertools.chain((self.valid_time_name,), self.names.values()))
             + "]>"
         )
         return string

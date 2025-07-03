@@ -5,6 +5,7 @@ from .forecast_index import (
     ForecastIndex,
     Model,
     ModelRun,
+    create_lazy_valid_time_variable,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ForecastIndex",
     "ModelRun",
     "Model",
+    "create_lazy_valid_time_variable",
 ]
