@@ -145,7 +145,9 @@ class ConstantForecast:
 
         # TODO: refactor this out
         if model is Model.HRRR:
-            model_mask[(needed_times.hour != 6) & (needed_steps > pd.to_timedelta("18h"))] = False
+            model_mask[(needed_times.hour % 6 != 0) & (needed_steps > pd.to_timedelta("18h"))] = (
+                False
+            )
 
         # It's possible we don't have the right step.
         # If pandas doesn't find an exact match it returns -1.
