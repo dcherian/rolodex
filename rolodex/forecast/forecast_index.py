@@ -173,6 +173,8 @@ class BestEstimate:
     # TODO: `since` could be a timedelta relative to `asof`.
     # since: pd.Timestamp | None = None
     asof: pd.Timestamp | None = None
+    # Start at this step.
+    offset: int = 0
 
     def __post_init__(self):
         if self.asof is not None and self.asof < self.since:
@@ -213,16 +215,17 @@ class BestEstimate:
                 np.repeat(i, n_best_steps_per_forecast[i])
                 for i in range(len(time_index)- 1)
             ] + [
-                np.repeat(last_index, nsteps),
+                np.repeat(last_index, nsteps - self.offset),
             ]
         )
 
+        # assume that there are enough steps to fulfill the requested offset
         needed_step_idxrs = np.concatenate(
             [
-                np.arange(n_best_steps_per_forecast[i])
+                np.arange(self.offset, n_best_steps_per_forecast[i] + self.offset)
                 for i in range(len(time_index) - 1)
             ] + [
-                np.arange(nsteps)
+                np.arange(self.offset, nsteps)
             ]
         )
 
