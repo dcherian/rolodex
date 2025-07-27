@@ -194,7 +194,6 @@ class BestEstimate:
         first_index = 0
         # else:
         # (first_index,) = time_index.get_indexer([self.since])
-
         last_index = time_index.size - 1 if self.asof is None else time_index.get_loc(self.asof)
 
         # TODO: refactor to a Model dataclass that does this filtering appropriately.
@@ -203,14 +202,28 @@ class BestEstimate:
         else:
             nsteps = period_index.size
 
+        time_diff = np.diff(time_index)
+        period_diff = np.diff(period_index)
+        
+        # assume that the period differences are constant 
+        n_best_steps_per_forecast = (time_diff / period_diff[0]).astype(int) 
+
         needed_time_idxrs = np.concatenate(
             [
-                np.arange(first_index, last_index, dtype=int),
+                np.repeat(i, n_best_steps_per_forecast[i])
+                for i in range(len(time_index)- 1)
+            ] + [
                 np.repeat(last_index, nsteps),
             ]
         )
+
         needed_step_idxrs = np.concatenate(
-            [np.zeros((last_index - first_index,), dtype=int), np.arange(nsteps)]
+            [
+                np.arange(n_best_steps_per_forecast[i])
+                for i in range(len(time_index) - 1)
+            ] + [
+                np.arange(nsteps)
+            ]
         )
 
         return needed_time_idxrs, needed_step_idxrs
