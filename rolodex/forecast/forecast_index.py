@@ -212,8 +212,7 @@ class BestEstimate:
 
         needed_time_idxrs = np.concatenate(
             [
-                np.repeat(np.arange(len(time_index)- 1), n_best_steps_per_forecast)
-            ] + [
+                np.repeat(np.arange(len(time_index)- 1), n_best_steps_per_forecast),
                 np.repeat(last_index, nsteps - self.offset),
             ]
         )
