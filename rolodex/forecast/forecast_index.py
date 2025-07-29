@@ -207,8 +207,7 @@ class BestEstimate:
         time_diff = np.diff(time_index)
         period_diff = np.diff(period_index)
         
-        # assume that the period differences are constant 
-        n_best_steps_per_forecast = (time_diff / period_diff[0]).astype(int) 
+        n_best_steps_per_forecast = (time_diff / period_diff).astype(int) 
 
         needed_time_idxrs = np.concatenate(
             [
