@@ -173,6 +173,8 @@ class BestEstimate:
     # TODO: `since` could be a timedelta relative to `asof`.
     # since: pd.Timestamp | None = None
     asof: pd.Timestamp | None = None
+    # Start at this step.
+    offset: int = 0
 
     def __post_init__(self):
         if self.asof is not None and self.asof < self.since:
@@ -194,7 +196,6 @@ class BestEstimate:
         first_index = 0
         # else:
         # (first_index,) = time_index.get_indexer([self.since])
-
         last_index = time_index.size - 1 if self.asof is None else time_index.get_loc(self.asof)
 
         # TODO: refactor to a Model dataclass that does this filtering appropriately.
@@ -203,14 +204,27 @@ class BestEstimate:
         else:
             nsteps = period_index.size
 
+        time_diff = np.diff(time_index)
+        # assume that the period differences are constant
+        period_diff = period_index[1] - period_index[0]
+        
+        n_best_steps_per_forecast = (time_diff / period_diff).astype(int) 
+
         needed_time_idxrs = np.concatenate(
             [
-                np.arange(first_index, last_index, dtype=int),
-                np.repeat(last_index, nsteps),
+                np.repeat(np.arange(len(time_index)- 1), n_best_steps_per_forecast),
+                np.repeat(last_index, nsteps - self.offset),
             ]
         )
+
+        # assume that there are enough steps to fulfill the requested offset
         needed_step_idxrs = np.concatenate(
-            [np.zeros((last_index - first_index,), dtype=int), np.arange(nsteps)]
+            [
+                np.arange(self.offset, n_best_steps_per_forecast[i] + self.offset)
+                for i in range(len(time_index) - 1)
+            ] + [
+                np.arange(self.offset, nsteps)
+            ]
         )
 
         return needed_time_idxrs, needed_step_idxrs
