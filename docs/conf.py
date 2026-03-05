@@ -119,13 +119,16 @@ html_theme_options = dict(
     sidebar_hide_name=False,
     light_css_variables=css_vars,
     dark_css_variables=css_vars,
+    source_repository="https://github.com/dcherian/rolodex",
+    source_branch="main",
+    source_directory="docs/",
 )
 
 html_context = {
     "github_user": "dcherian",
     "github_repo": "rolodex",
     "github_version": "main",
-    "doc_path": "doc",
+    "doc_path": "docs",
 }
 html_title = "rolodex"
 html_static_path = ["_static"]
